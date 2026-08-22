@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="Decode, inspect and build CBOR documents carrying metrological values — CBOR tag 44252 (mCBOR). Runs entirely in your browser.">
+
+    <title>Metrological CBOR Validator</title>
+
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e7490'/%3E%3Ctext x='32' y='42' font-family='monospace' font-size='26' font-weight='bold' fill='white' text-anchor='middle'%3EmC%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="styles.css">
+
+    <script src="validator.js" defer></script>
+
+</head>
+<body>
+
+    <header class="site-header">
+        <div class="wrap">
+            <h1>Metrological CBOR <span class="thin">Validator</span></h1>
+            <p class="tagline">
+                Decode, inspect and build CBOR documents carrying measured physical quantities
+                — <a href="https://github.com/OpenChargingTechnology/Whitepapers/tree/master/MetrologicalCBOR" rel="noopener">Metrological&nbsp;CBOR</a>,
+                CBOR&nbsp;tag&nbsp;<code>44252</code>. Everything runs locally in your browser; nothing is uploaded.
+            </p>
+        </div>
+    </header>
+
+    <main class="wrap">
+
+        <section class="controls">
+            <div class="mode-switch" role="tablist" aria-label="Direction">
+                <button id="modeDecode" type="button" role="tab" aria-selected="true"  class="active">CBOR&nbsp;→&nbsp;JSON</button>
+                <button id="modeEncode" type="button" role="tab" aria-selected="false">JSON&nbsp;→&nbsp;CBOR</button>
+            </div>
+            <div class="examples">
+                <span class="examples-label">Examples:</span>
+                <span id="exampleButtons"></span>
+            </div>
+        </section>
+
+        <section class="input-panel">
+            <div class="input-head">
+                <label id="inputLabel" for="input">CBOR input — hexadecimal or Base64</label>
+                <label id="readingsOption" class="option" hidden>
+                    <input type="checkbox" id="detectReadings" checked>
+                    Convert reading&#8209;like strings to tag&nbsp;44252
+                </label>
+                <button id="clearInput" type="button" class="ghost">Clear</button>
+            </div>
+            <textarea id="input" spellcheck="false" autocomplete="off" autocapitalize="off"
+                      placeholder="Paste CBOR as hexadecimal, e.g.&#10;&#10;D9ACDC 83 C482201832 04 22"></textarea>
+            <div id="status" class="status idle" role="status">Waiting for input …</div>
+        </section>
+
+        <section id="results" hidden>
+
+            <div class="panel" id="hexPanel" hidden>
+                <div class="panel-head">
+                    <h2>CBOR <span class="unit-note">(hexadecimal)</span></h2>
+                    <span class="panel-meta" id="hexMeta"></span>
+                    <button type="button" class="copy" data-copy="hex">Copy</button>
+                </div>
+                <pre id="hexOut" class="hexdump"></pre>
+            </div>
+
+            <div class="panel" id="readingsPanel" hidden>
+                <div class="panel-head">
+                    <h2>Metrological readings</h2>
+                    <span class="panel-meta" id="readingsMeta"></span>
+                </div>
+                <div id="readingChips" class="chips"></div>
+            </div>
+
+            <div class="columns">
+                <div class="panel" id="treePanel">
+                    <div class="panel-head">
+                        <h2>Structure</h2>
+                        <span class="panel-meta" id="treeMeta"></span>
+                    </div>
+                    <div id="tree" class="tree"></div>
+                </div>
+                <div class="panel" id="jsonPanel">
+                    <div class="panel-head">
+                        <h2>JSON</h2>
+                        <span class="panel-meta" id="jsonMeta"></span>
+                        <button type="button" class="copy" data-copy="json">Copy</button>
+                    </div>
+                    <pre id="jsonOut" class="json"></pre>
+                </div>
+            </div>
+
+            <div class="panel" id="diagPanel">
+                <div class="panel-head">
+                    <h2>Diagnostic notation <span class="unit-note">(RFC&nbsp;8949&nbsp;§8)</span></h2>
+                    <button type="button" class="copy" data-copy="diag">Copy</button>
+                </div>
+                <pre id="diagOut" class="diag"></pre>
+            </div>
+
+        </section>
+
+    </main>
+
+    <footer class="site-footer">
+        <div class="wrap">
+            <p>
+                Built on
+                <a href="https://www.npmjs.com/package/@vanaheimr/metrological-cbor" rel="noopener">@vanaheimr/metrological&#8209;cbor</a> <span id="mcborVersion"></span>
+                and
+                <a href="https://www.npmjs.com/package/@vanaheimr/cose" rel="noopener">@vanaheimr/cose</a> <span id="coseVersion"></span>.
+            </p>
+            <p>
+                <a href="https://github.com/OpenChargingTechnology/Whitepapers/tree/master/MetrologicalCBOR" rel="noopener">Specification</a> ·
+                <a href="https://www.iana.org/assignments/cbor-tags" rel="noopener">IANA CBOR tag 44252</a> ·
+                <a href="https://www.rfc-editor.org/rfc/rfc8949" rel="noopener">RFC 8949 (CBOR)</a> ·
+                <a href="https://www.rfc-editor.org/rfc/rfc9052" rel="noopener">RFC 9052 (COSE)</a>
+            </p>
+        </div>
+    </footer>
+
+</body>
+</html>
