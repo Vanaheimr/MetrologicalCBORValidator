@@ -10,18 +10,13 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@vanaheimr/cose": "^0.9.0",
-    "@vanaheimr/metrological-cbor": "^0.11.0"
+    "@vanaheimr/cose": "^0.10.0",
+    "@vanaheimr/metrological-cbor": "^0.11.1"
   },
   "devDependencies": {
     "copy-webpack-plugin": "^14.0.0",
     "terser-webpack-plugin": "^5.6.1",
     "webpack": "^5.112.2",
     "webpack-cli": "^7.2.3"
-  },
-  "overrides": {
-    "@vanaheimr/cose": {
-      "@vanaheimr/metrological-cbor": "$@vanaheimr/metrological-cbor"
-    }
   }
 }
