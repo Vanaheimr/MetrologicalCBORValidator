@@ -29,6 +29,19 @@ for (const [, attribute, url] of html.matchAll(/<(?:script|link)\b[^>]*\b(src|hr
     if (/^(https?:)?\/\//i.test(url))
         failures.push(`index.html loads ${attribute}="${url}" from another host`);
 
+// The licence notices of the bundled packages travel only inside the bundle,
+// so a minifier setting that strips the banner would quietly break the
+// licences of everything the page ships.
+const bundle = await readFile(join(dist, 'validator.js'), 'utf8').catch(() => '');
+
+if (!bundle.startsWith('/*!\n * Metrological CBOR Validator'))
+    failures.push('validator.js does not start with its licence banner');
+for (const name of ['@vanaheimr/metrological-cbor', '@vanaheimr/cose'])
+    if (!bundle.slice(0, 4000).includes(` * ${name} `))
+        failures.push(`the licence banner of validator.js does not name ${name}`);
+if (/ \* @noble\/\S+ \S+ — MIT/.test(bundle.slice(0, 4000)) && !bundle.includes('Permission is hereby granted'))
+    failures.push('validator.js bundles MIT-licensed code without the MIT permission notice');
+
 if (failures.length > 0) {
     console.error(failures.map((failure) => `✕ ${failure}`).join('\n'));
     process.exit(1);

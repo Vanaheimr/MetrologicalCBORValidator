@@ -4,7 +4,7 @@
 [![Nightly](https://github.com/Vanaheimr/MetrologicalCBORValidator/actions/workflows/nightly.yml/badge.svg)](https://github.com/Vanaheimr/MetrologicalCBORValidator/actions/workflows/nightly.yml)
 [![metrological-cbor](https://img.shields.io/npm/v/@vanaheimr/metrological-cbor.svg?label=%40vanaheimr%2Fmetrological-cbor)](https://www.npmjs.com/package/@vanaheimr/metrological-cbor)
 [![cose](https://img.shields.io/npm/v/@vanaheimr/cose.svg?label=%40vanaheimr%2Fcose)](https://www.npmjs.com/package/@vanaheimr/cose)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A static single-page validator for [Metrological CBOR](https://github.com/OpenChargingTechnology/Whitepapers/tree/master/MetrologicalCBOR)
 (CBOR tag 44252), in the spirit of the classic JSON validator pages. Everything
@@ -47,8 +47,11 @@ dist/validator.js
 
 Deploying is copying those three files onto any web server (or opening them
 from any static hosting). There is no backend and there are no further
-runtime dependencies; the license banners of the bundled libraries are kept
-inside `validator.js`.
+runtime dependencies. Because the page is only those three files, the
+copyright and license notices of everything bundled into `validator.js` —
+the Vanaheimr packages (Apache-2.0) and the `@noble` cryptography (MIT) — are
+generated into its head at build time, from the LICENSE and NOTICE files of
+exactly the packages webpack bundled.
 
 `npm run watch` rebuilds on change during development, and `npm run serve`
 serves `dist/` at http://localhost:8137/ the way a web server would.
@@ -60,8 +63,8 @@ npx playwright install chromium
 npm run verify
 ```
 
-`verify` builds, checks that `dist/` holds exactly the three deployable files
-and loads nothing from another host, and then drives the built page in a real
+`verify` builds, checks that `dist/` holds exactly the three deployable files,
+loads nothing from another host and carries its license notices, and then drives the built page in a real
 browser with [Playwright](https://playwright.dev): the worked examples of the
 codec's README decode to the readings they document, malformed and
 non-deterministic CBOR is refused or flagged, a tag 44252 that is not a valid
@@ -81,4 +84,7 @@ dependency resolved afresh without the lock file, the newest published
 
 ## License
 
-Apache License 2.0, matching the libraries it is built on.
+[Apache License 2.0](LICENSE) and [NOTICE](NOTICE), matching the libraries it
+is built on.
+
+Copyright 2026 GraphDefined GmbH

@@ -4,6 +4,7 @@ const path            = require('path');
 const webpack         = require('webpack');
 const CopyPlugin      = require('copy-webpack-plugin');
 const TerserPlugin    = require('terser-webpack-plugin');
+const LicenseBanner   = require('./scripts/license-banner-plugin');
 
 const appVersion      = require('./package.json').version;
 const mcborVersion    = require('@vanaheimr/metrological-cbor/package.json').version;
@@ -27,6 +28,12 @@ module.exports = {
             __APP_VERSION__:   JSON.stringify(appVersion),
             __MCBOR_VERSION__: JSON.stringify(mcborVersion),
             __COSE_VERSION__:  JSON.stringify(coseVersion)
+        }),
+        new LicenseBanner({
+            title:     `Metrological CBOR Validator ${appVersion}`,
+            copyright: 'Copyright 2026 GraphDefined GmbH',
+            license:   'Apache License 2.0',
+            url:       'https://github.com/Vanaheimr/MetrologicalCBORValidator'
         }),
         new CopyPlugin({
             patterns: [
