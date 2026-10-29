@@ -44,7 +44,34 @@ from any static hosting). There is no backend and there are no further
 runtime dependencies; the license banners of the bundled libraries are kept
 inside `validator.js`.
 
-`npm run watch` rebuilds on change during development.
+`npm run watch` rebuilds on change during development, and `npm run serve`
+serves `dist/` at http://localhost:8137/ the way a web server would.
+
+## Testing
+
+```
+npx playwright install chromium
+npm run verify
+```
+
+`verify` builds, checks that `dist/` holds exactly the three deployable files
+and loads nothing from another host, and then drives the built page in a real
+browser with [Playwright](https://playwright.dev): the worked examples of the
+codec's README decode to the readings they document, malformed and
+non-deterministic CBOR is refused or flagged, a tag 44252 that is not a valid
+metrological value fails validation, JSON round-trips through CBOR unchanged,
+and the COSE-signed example verifies with the key it was made from. Any page
+error or console error fails the test it happened in. `BROWSERS=all` runs
+Chromium, Firefox and WebKit.
+
+**CI** runs `npm run verify` on every push and pull request — Node 20, 22 and
+24 on Linux, Node 22 on Windows and macOS — and keeps the built files of each
+green run as a downloadable artifact.
+
+**Nightly** runs what nobody waits for: all three browser engines with every
+dependency resolved afresh without the lock file, the newest published
+`@vanaheimr/metrological-cbor` and `@vanaheimr/cose` even where their next
+0.x minor lies outside the caret ranges, and `npm audit`.
 
 ## License
 

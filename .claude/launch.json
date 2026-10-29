@@ -3,8 +3,8 @@
     "configurations": [
         {
             "name": "validator",
-            "runtimeExecutable": "npx",
-            "runtimeArgs": ["--yes", "http-server", "dist", "-p", "8137", "-c-1", "--silent"],
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["scripts/serve.mjs", "8137"],
             "port": 8137
         }
     ]

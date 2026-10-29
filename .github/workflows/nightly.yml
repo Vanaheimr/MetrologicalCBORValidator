@@ -1,0 +1,86 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '43 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  verify:
+    name: Every browser engine on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24', 'latest']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies without the lock file
+        # Pull requests install from the lock file; this resolves every caret
+        # range afresh, so a new release of webpack, Playwright or the noble
+        # cryptography that breaks the build surfaces here first.
+        run: npm install
+
+      - name: Install Chromium, Firefox and WebKit
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Verify in every engine
+        # Pull requests test in Chromium only. The page is meant to be copied
+        # onto any web server and opened in any browser, so the claim is
+        # checked against all three engines once a day.
+        run: npm run verify
+        env:
+          BROWSERS: all
+
+  upcoming:
+    name: Newest Vanaheimr releases
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install the newest published codec and COSE
+        # Under 0.x a caret range never admits the next minor, so `npm install`
+        # alone would not notice @vanaheimr/metrological-cbor 0.12 or
+        # @vanaheimr/cose 0.11 arriving. This installs whatever `latest` is
+        # and tells the morning after a release whether the validator still
+        # builds and passes against it — before anyone moves the ranges.
+        run: npm install --no-save @vanaheimr/metrological-cbor@latest @vanaheimr/cose@latest
+
+      - name: Report the versions under test
+        run: |
+          npm ls @vanaheimr/metrological-cbor @vanaheimr/cose
+          { echo '```'; npm ls @vanaheimr/metrological-cbor @vanaheimr/cose; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - run: npx playwright install --with-deps chromium
+      - run: npm run verify
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
