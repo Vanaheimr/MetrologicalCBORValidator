@@ -222,7 +222,7 @@ function collectReadings(value, strict, list, prefix = '$') {
             try {
                 list.push({ ok: true, text: formatMetrologicalValue(metrologicalValueFromCbor(item, { strict })), path: where });
             } catch (error) {
-                list.push({ ok: false, text: error.message, path: where });
+                list.push({ ok: false, text: error.message, path: where, error });
             }
             return;
         }
@@ -773,7 +773,15 @@ function runDecode(text) {
     const counts   = `${input.bytes.length} bytes (${input.encoding})`
                    + (readings.length > 0 ? ` · ${readings.length} reading${readings.length === 1 ? '' : 's'}` : '');
 
-    if (strict)
+    const invalid = readings.filter((reading) => !reading.ok);
+
+    if (invalid.length > 0)
+        setStatus('error',
+            `Well-formed CBOR, but ${invalid.length === 1 ? 'a tag-44252 item is not a valid metrological value'
+                                                         : `${invalid.length} tag-44252 items are not valid metrological values`}`
+            + ` — ${invalid[0].path}: ${invalid[0].text}`,
+            errorDetails(invalid[0].error));
+    else if (strict)
         setStatus('ok', `Valid CBOR — deterministic encoding · ${counts}`);
     else
         setStatus('warn',
