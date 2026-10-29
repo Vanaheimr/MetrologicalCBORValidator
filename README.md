@@ -1,5 +1,11 @@
 # Metrological CBOR Validator
 
+[![CI](https://github.com/Vanaheimr/MetrologicalCBORValidator/actions/workflows/ci.yml/badge.svg)](https://github.com/Vanaheimr/MetrologicalCBORValidator/actions/workflows/ci.yml)
+[![Nightly](https://github.com/Vanaheimr/MetrologicalCBORValidator/actions/workflows/nightly.yml/badge.svg)](https://github.com/Vanaheimr/MetrologicalCBORValidator/actions/workflows/nightly.yml)
+[![metrological-cbor](https://img.shields.io/npm/v/@vanaheimr/metrological-cbor.svg?label=%40vanaheimr%2Fmetrological-cbor)](https://www.npmjs.com/package/@vanaheimr/metrological-cbor)
+[![cose](https://img.shields.io/npm/v/@vanaheimr/cose.svg?label=%40vanaheimr%2Fcose)](https://www.npmjs.com/package/@vanaheimr/cose)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
+
 A static single-page validator for [Metrological CBOR](https://github.com/OpenChargingTechnology/Whitepapers/tree/master/MetrologicalCBOR)
 (CBOR tag 44252), in the spirit of the classic JSON validator pages. Everything
 runs locally in the browser; nothing is uploaded anywhere.
