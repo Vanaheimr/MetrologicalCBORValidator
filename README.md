@@ -82,6 +82,10 @@ dependency resolved afresh without the lock file, the newest published
 `@vanaheimr/metrological-cbor` and `@vanaheimr/cose` even where their next
 0.x minor lies outside the caret ranges, and `npm audit`.
 
+**Dependabot** opens the pull requests that follow: daily for npm — the two
+Vanaheimr packages together in one, since COSE re-exports the codec, and the
+build and test tooling in another — and weekly for the GitHub Actions.
+
 ## License
 
 [Apache License 2.0](LICENSE) and [NOTICE](NOTICE), matching the libraries it

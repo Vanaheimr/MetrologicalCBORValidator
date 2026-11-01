@@ -1,0 +1,28 @@
+version: 2
+
+updates:
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+    groups:
+      # The COSE package re-exports the codec, so both have to move in one
+      # step: npm then installs a single copy and CborError stays one class.
+      # Under 0.x every new minor is a range change, which is exactly what a
+      # pull request is for here.
+      vanaheimr:
+        patterns:
+          - '@vanaheimr/*'
+      # webpack, its plugins and Playwright: one pull request, not five.
+      build-and-test:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - '*'
