@@ -194,7 +194,8 @@ test.describe('CBOR → JSON', () => {
     test('reads the readings inside a COSE_Sign1 payload, and the signature is genuine', async ({ page }) => {
         await page.getByRole('button', { name: 'COSE-signed record' }).click();
         await expect(status(page)).toHaveClass(/\bok\b/);
-        await expect(page.locator('#tree')).toContainText('ES256 · kid "meter-0042"');
+        await expect(page.locator('#tree')).toContainText('ESP256 · kid "meter-0042"');
+        await expect(page.locator('#tree')).not.toContainText('deprecated');
         await expect(page.locator('.reading-path')).toHaveText([
             '$ » payload.energy', '$ » payload.current', '$ » payload.voltage', '$ » payload.temperature',
         ]);
@@ -205,7 +206,7 @@ test.describe('CBOR → JSON', () => {
         const key     = CoseKey.fromPrivateScalar(
             CoseCurves.P256,
             hexToBytes('6C1382765AEC5358F117733D281C1C7BDC39884D04A45A1E6C67C858BC206C19'),
-            { algorithm: CoseAlgorithms.ES256 });
+            { algorithm: CoseAlgorithms.ESP256 });
         expect(message.verify(key.publicKey()).verified).toBe(true);
 
         // The example's key field holds exactly that public key, so the page
@@ -236,6 +237,8 @@ test.describe('CBOR → JSON', () => {
         await expect(verifyKey(page)).toHaveValue('');
         await expect(status(page)).toHaveClass(/\bok\b/);
         await expect(signatures(page)).toHaveClass(/\bsig-verified\b/);
+        await expect(page.locator('#tree')).toContainText('ESP256');
+        await expect(page.locator('#tree')).not.toContainText('deprecated');
         await expect(signatures(page)).toContainText('Matches the certificate it carries (x5chain): O=Example Meter Vendor,CN=meter-0042');
         await expect(signatures(page)).toContainText('not checked');
 

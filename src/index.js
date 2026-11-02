@@ -1211,7 +1211,7 @@ function buildExamples() {
             const key = CoseKey.fromPrivateScalar(
                 CoseCurves.P256,
                 hexToBytes(EXAMPLE_KEY_SCALAR),
-                { algorithm: CoseAlgorithms.ES256, keyIdentifier: utf8('meter-0042') });
+                { algorithm: CoseAlgorithms.ESP256, keyIdentifier: utf8('meter-0042') });
             const signed = CoseSign1.sign(sessionBytes, key);
             examples.decode.push({
                 label: 'COSE-signed record',
@@ -1228,9 +1228,9 @@ function buildExamples() {
             const key = CoseKey.fromPrivateScalar(
                 CoseCurves.P256,
                 hexToBytes(EXAMPLE_CERTIFICATE_SCALAR),
-                { algorithm: CoseAlgorithms.ES256 });
+                { algorithm: CoseAlgorithms.ESP256 });
             const chain   = new CoseCertificateChain([X509Certificate.parse(hexToBytes(EXAMPLE_CERTIFICATE))]);
-            const headers = CoseHeaders.create(CoseAlgorithms.ES256).set(label(HeaderLabel.x5Chain), chain.toCbor());
+            const headers = CoseHeaders.create(CoseAlgorithms.ESP256).set(label(HeaderLabel.x5Chain), chain.toCbor());
             const signed  = CoseSign1.signWithHeaders(sessionBytes, key, headers, null);
             examples.decode.push({ label: 'COSE with certificate', value: bytesToHex(signed.toBytes()), key: '' });
         }
