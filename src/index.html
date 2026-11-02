@@ -52,6 +52,12 @@
             </div>
             <textarea id="input" spellcheck="false" autocomplete="off" autocapitalize="off"
                       placeholder="Paste CBOR as hexadecimal, e.g.&#10;&#10;D9ACDC 83 C482201832 04 22"></textarea>
+            <p id="encodeNote" class="input-note" hidden>
+                Every number keeps the digits it was written with
+                (<a href="https://github.com/OpenChargingTechnology/Whitepapers/tree/master/MetrologicalCBOR" rel="noopener">metrological-text.md</a>&nbsp;§3.2):
+                integers of any size stay integers, a number with a fractional part becomes an exact decimal fraction
+                (CBOR&nbsp;tag&nbsp;4) rather than a binary float, and a key that appears twice is an error.
+            </p>
             <div id="status" class="status idle" role="status">Waiting for input …</div>
         </section>
 
@@ -74,6 +80,22 @@
                 <div id="readingChips" class="chips"></div>
             </div>
 
+            <div class="panel" id="sigPanel" hidden>
+                <div class="panel-head">
+                    <h2>Signatures</h2>
+                    <span class="panel-meta" id="sigMeta"></span>
+                </div>
+                <div class="sig-key">
+                    <label for="verifyKey">
+                        Verification key <span class="unit-note">— a COSE_Key, or an X.509 certificate (PEM, or DER as hexadecimal or Base64). A certificate also serves as the trust anchor for messages that carry a chain.</span>
+                    </label>
+                    <textarea id="verifyKey" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off"
+                              placeholder="Optional — messages that carry their certificate (x5chain) are checked against it either way"></textarea>
+                    <div id="keyStatus" class="key-status"></div>
+                </div>
+                <div id="sigList" class="sig-list"></div>
+            </div>
+
             <div class="columns">
                 <div class="panel" id="treePanel">
                     <div class="panel-head">
@@ -88,6 +110,7 @@
                         <span class="panel-meta" id="jsonMeta"></span>
                         <button type="button" class="copy" data-copy="json">Copy</button>
                     </div>
+                    <p id="jsonNote" class="panel-note" hidden></p>
                     <pre id="jsonOut" class="json"></pre>
                 </div>
             </div>

@@ -8,7 +8,7 @@
 
 import { test as base, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
-import { bytesToHex, hexToBytes } from '@vanaheimr/metrological-cbor';
+import { bytesToHex, hexToBytes, jsonTextToMcbor } from '@vanaheimr/metrological-cbor';
 import { CoseSign1, CoseKey, CoseCurves, CoseAlgorithms } from '@vanaheimr/cose';
 
 const require = createRequire(import.meta.url);
@@ -30,6 +30,12 @@ const shownJson = async (page) => JSON.parse(await page.locator('#jsonOut').text
 const shownHex = async (page) => (await page.locator('#hexOut').textContent()).replace(/\s+/g, '');
 
 const readingTexts = (page) => page.locator('.reading-chip code');
+
+const verifyKey  = (page) => page.locator('#verifyKey');
+const signatures = (page) => page.locator('#sigList .sig');
+
+/** Flips the last hexadecimal digit of a message, which lies in its signature. */
+const flipLastDigit = (hex) => hex.slice(0, -1) + (hex.endsWith('0') ? '1' : '0');
 
 
 // Every test fails on an uncaught exception or a console error, whatever it
@@ -94,6 +100,42 @@ test.describe('CBOR → JSON', () => {
         const tree = page.locator('#tree');
         await expect(tree).toContainText('V — volt');
         await expect(tree).toContainText('coverage factor');
+    });
+
+    test('states the standard uncertainty U/k, exactly where it is exact', async ({ page }) => {
+        // The library's own example: U = 0.12 V with k = 2 is u = 0.060 V.
+        await input(page).fill(README.certificate);
+        await expect(page.locator('.reading-note')).toHaveText(['u = 0.060 V (U/k, k=2)']);
+
+        // 1.0 V / 3 has no exact decimal form, and says so.
+        await page.locator('#modeEncode').click();
+        await input(page).fill('{ "u": "(10.0 ±1.0) V, k=3", "plain": "1.10 kWh" }');
+        await expect(page.locator('.reading-note')).toHaveText(['u ≈ 0.333 V (U/k, k=3)']);
+        await expect(page.locator('.reading-chip')).toHaveCount(2);
+    });
+
+    test('writes the JSON text of the specification, with every digit', async ({ page }) => {
+        // {"n": 18446744073709551615}: beyond 2^53, where a JavaScript number
+        // would already have rounded it.
+        await input(page).fill('A1616E1BFFFFFFFFFFFFFFFF');
+        await expect(page.locator('#jsonMeta')).toHaveText('metrological-text.md §3.1');
+        await expect(page.locator('#jsonOut')).toHaveText('{\n  "n": 18446744073709551615\n}');
+
+        // A decimal fraction is a number in that text, not a tagged array.
+        await input(page).fill('A16178C482200A');   // {"x": 4([-1, 10])}
+        await expect(page.locator('#jsonOut')).toHaveText('{\n  "x": 1.0\n}');
+    });
+
+    test('says so when a document has no JSON text, and shows it all the same', async ({ page }) => {
+        await input(page).fill('A10102');            // {1: 2} — an integer key
+        await expect(status(page)).toHaveClass(/\bok\b/);
+        await expect(page.locator('#jsonMeta')).toHaveText('extended rendering');
+        await expect(page.locator('#jsonNote')).toBeVisible();
+        await expect(page.locator('#jsonNote')).not.toContainText('mapKeys');
+        expect(await shownJson(page)).toEqual({ 1: 2 });
+
+        await input(page).fill(README.certificate);
+        await expect(page.locator('#jsonNote')).toBeHidden();
     });
 
     test('accepts the usual spellings of hexadecimal, and Base64', async ({ page }) => {
@@ -165,6 +207,61 @@ test.describe('CBOR → JSON', () => {
             hexToBytes('6C1382765AEC5358F117733D281C1C7BDC39884D04A45A1E6C67C858BC206C19'),
             { algorithm: CoseAlgorithms.ES256 });
         expect(message.verify(key.publicKey()).verified).toBe(true);
+
+        // The example's key field holds exactly that public key, so the page
+        // reaches the same verdict.
+        expect(CoseKey.parse(hexToBytes(await verifyKey(page).inputValue())).isPrivate).toBe(false);
+        await expect(signatures(page)).toHaveCount(1);
+        await expect(signatures(page)).toHaveClass(/\bsig-verified\b/);
+        await expect(signatures(page)).toContainText('Verified with the COSE_Key "meter-0042"');
+        await expect(status(page)).toContainText('1 signature verified');
+    });
+
+    test('fails a COSE_Sign1 whose signature does not match the key', async ({ page }) => {
+        await page.getByRole('button', { name: 'COSE-signed record' }).click();
+        await input(page).fill(flipLastDigit(await input(page).inputValue()));
+        await expect(status(page)).toHaveClass(/\berror\b/);
+        await expect(status(page)).toContainText('a signature does not verify');
+        await expect(signatures(page)).toHaveClass(/\bsig-failed\b/);
+
+        // Without a key nothing is claimed either way.
+        await verifyKey(page).fill('');
+        await expect(status(page)).toHaveClass(/\bok\b/);
+        await expect(signatures(page)).toHaveClass(/\bsig-pending\b/);
+        await expect(signatures(page)).toContainText('Not checked: no key');
+    });
+
+    test('checks a COSE_Sign1 against the certificate it carries, and against a trusted one', async ({ page }) => {
+        await page.getByRole('button', { name: 'COSE with certificate' }).click();
+        await expect(verifyKey(page)).toHaveValue('');
+        await expect(status(page)).toHaveClass(/\bok\b/);
+        await expect(signatures(page)).toHaveClass(/\bsig-verified\b/);
+        await expect(signatures(page)).toContainText('Matches the certificate it carries (x5chain): O=Example Meter Vendor,CN=meter-0042');
+        await expect(signatures(page)).toContainText('not checked');
+
+        // The certificate, read from the message in Node and handed back as
+        // PEM, is the trust anchor the chain is then walked to.
+        const message     = CoseSign1.parse(hexToBytes(await input(page).inputValue()));
+        const certificate = message.certificateChain.endEntity.encoded;
+        const pem         = '-----BEGIN CERTIFICATE-----\n'
+                          + Buffer.from(certificate).toString('base64').match(/.{1,64}/g).join('\n')
+                          + '\n-----END CERTIFICATE-----\n';
+        await verifyKey(page).fill(pem);
+        await expect(page.locator('#keyStatus')).toContainText('Using the certificate O=Example Meter Vendor,CN=meter-0042');
+        await expect(signatures(page)).toContainText('its certificate chain leads to the certificate you supplied');
+
+        // A message that was altered on the way fails against its own certificate.
+        await verifyKey(page).fill('');
+        await input(page).fill(flipLastDigit(await input(page).inputValue()));
+        await expect(status(page)).toHaveClass(/\berror\b/);
+        await expect(signatures(page)).toContainText('Does not verify with the key of the certificate it carries');
+    });
+
+    test('says which text in the key field is not a key', async ({ page }) => {
+        await page.getByRole('button', { name: 'COSE-signed record' }).click();
+        await verifyKey(page).fill('A101FF');
+        await expect(page.locator('#keyStatus')).toContainText('Neither a COSE_Key nor an X.509 certificate');
+        await expect(signatures(page)).toHaveClass(/\bsig-pending\b/);
     });
 
 });
@@ -198,6 +295,21 @@ test.describe('JSON → CBOR', () => {
         await input(page).fill('{ "a": ');
         await expect(status(page)).toHaveClass(/\berror\b/);
         await expect(status(page)).toContainText('Invalid JSON');
+    });
+
+    test('keeps every digit of every number, and refuses a key given twice', async ({ page }) => {
+        // JSON.parse would make 9007199254740992 of the first and keep the
+        // second "a" alone.
+        const text = '{ "n": 9007199254740993, "big": 18446744073709551615, "price": 0.30 }';
+        await input(page).fill(text);
+        await expect(status(page)).toHaveClass(/\bok\b/);
+        await expect.poll(() => shownHex(page)).toBe(bytesToHex(jsonTextToMcbor(text)));
+        await expect(page.locator('#diagOut')).toHaveText(
+            '{"n": 9007199254740993, "big": 18446744073709551615, "price": 4([-2, 30])}');
+
+        await input(page).fill('{ "a": 1, "a": 2 }');
+        await expect(status(page)).toHaveClass(/\berror\b/);
+        await expect(status(page)).toContainText('the same key twice');
     });
 
     test('round-trips a document through CBOR and back', async ({ page }) => {

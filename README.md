@@ -16,16 +16,26 @@ Two directions, switchable on the page:
   - a validation verdict (valid deterministic encoding / well-formed but
     lenient / invalid, with the error code and specification clause),
   - every tag-44252 reading, decoded and formatted (`(230.00 ±0.12) V, k=2`),
-    COSE payloads included,
+    COSE payloads included, with its standard uncertainty *u* = *U*/*k*
+    where a coverage factor is stated (`u = 0.060 V`),
+  - the verdict on every COSE_Sign1 and COSE_Sign signature: against the
+    certificate a message carries (`x5chain`), against a COSE_Key or X.509
+    certificate pasted into the key field, and — given a certificate — whether
+    the message's chain leads to it,
   - the structured parse tree, with mCBOR roles (value, unit, prefix,
     uncertainty), unit and SI-prefix names, and COSE_Sign1/COSE_Sign/… buckets
     annotated and their protected headers and payloads decoded inline,
-  - a JSON rendering with every reading as one string (`"230 V"`), and
+  - the JSON text of metrological-text.md §3.1, with every reading as one
+    string (`"230 V"`) and every number with all its digits — or, for what
+    that text cannot hold, an extended rendering that says so — and
   - the diagnostic notation of RFC 8949 §8.
-- **JSON → CBOR** — paste JSON and get deterministic CBOR as hexadecimal.
-  Property values that read as metrological values (`"1.10 kWh"`,
-  `"(1234.567 ±12.3) kWh, k=2, p=0.95, dist=normal"`) are converted to CBOR
-  tag 44252; everything else maps one-to-one under the usual JSON→CBOR rules.
+- **JSON → CBOR** — paste JSON and get deterministic CBOR as hexadecimal,
+  under §3.2 of the same document. Property values that read as metrological
+  values (`"1.10 kWh"`, `"(1234.567 ±12.3) kWh, k=2, p=0.95, dist=normal"`)
+  are converted to CBOR tag 44252. Every number keeps the digits it was
+  written with: integers of any size stay exact, a number with a fractional
+  part becomes a decimal fraction (tag 4) rather than a binary float, and a
+  key given twice is refused rather than silently overwritten.
 
 Built on [@vanaheimr/metrological-cbor](https://www.npmjs.com/package/@vanaheimr/metrological-cbor)
 and [@vanaheimr/cose](https://www.npmjs.com/package/@vanaheimr/cose).
@@ -68,8 +78,10 @@ loads nothing from another host and carries its license notices, and then drives
 browser with [Playwright](https://playwright.dev): the worked examples of the
 codec's README decode to the readings they document, malformed and
 non-deterministic CBOR is refused or flagged, a tag 44252 that is not a valid
-metrological value fails validation, JSON round-trips through CBOR unchanged,
-and the COSE-signed example verifies with the key it was made from. Any page
+metrological value fails validation, JSON round-trips through CBOR unchanged
+with every digit of every number, a COSE signature verifies with the right key
+or certificate and fails once the message is altered, and the
+COSE-signed example verifies in Node with the key it was made from. Any page
 error or console error fails the test it happened in. `BROWSERS=all` runs
 Chromium, Firefox and WebKit.
 

@@ -303,6 +303,12 @@ textarea#input:focus {
 
 textarea#input::placeholder { color: var(--muted); opacity: 0.7; }
 
+.input-note {
+    margin:    6px 2px 0;
+    font-size: 0.82rem;
+    color:     var(--muted);
+}
+
 /* --------------------------------------------------------------------------
    Status line
    -------------------------------------------------------------------------- */
@@ -439,6 +445,15 @@ pre.json { white-space: pre; }
 
 .json-error { color: var(--error-fg); }
 
+.panel-note {
+    margin:        0;
+    padding:       8px 14px;
+    font-size:     0.8rem;
+    color:         var(--warn-fg);
+    background:    var(--warn-bg);
+    border-bottom: 1px solid var(--warn-border);
+}
+
 /* --------------------------------------------------------------------------
    Metrological reading chips
    -------------------------------------------------------------------------- */
@@ -475,11 +490,101 @@ pre.json { white-space: pre; }
     word-break:  break-all;
 }
 
+.reading-chip .reading-note {
+    font-family: var(--mono);
+    font-size:   0.78rem;
+    word-break:  break-word;
+}
+
 .reading-chip.reading-bad {
     border-color: var(--error-fg);
     background:   var(--error-bg);
     color:        var(--error-fg);
 }
+
+/* --------------------------------------------------------------------------
+   Signatures
+   -------------------------------------------------------------------------- */
+
+.sig-key {
+    padding:       10px 14px;
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.sig-key label {
+    display:       block;
+    font-size:     0.85rem;
+    font-weight:   600;
+    margin-bottom: 6px;
+}
+
+textarea#verifyKey {
+    width:         100%;
+    resize:        vertical;
+    padding:       7px 10px;
+    font-family:   var(--mono);
+    font-size:     12.5px;
+    line-height:   1.5;
+    color:         var(--text);
+    background:    var(--panel-inset);
+    border:        1px solid var(--border);
+    border-radius: 8px;
+}
+
+textarea#verifyKey:focus {
+    outline:      none;
+    border-color: var(--accent);
+    box-shadow:   0 0 0 3px var(--focus);
+}
+
+textarea#verifyKey::placeholder { color: var(--muted); opacity: 0.8; }
+
+.key-status       { font-size: 0.8rem; margin-top: 4px; word-break: break-word; }
+.key-status:empty { display: none; }
+.key-ok           { color: var(--muted); }
+.key-error        { color: var(--error-fg); }
+
+.sig-list {
+    display:        flex;
+    flex-direction: column;
+    gap:            8px;
+    padding:        12px 14px;
+}
+
+.sig {
+    border:        1px solid var(--border);
+    border-left:   4px solid var(--muted);
+    border-radius: 8px;
+    padding:       8px 12px;
+    min-width:     0;
+}
+
+.sig-verified { border-left-color: var(--ok-fg); }
+.sig-failed   { border-left-color: var(--error-fg); }
+
+.sig-head {
+    display:       flex;
+    flex-wrap:     wrap;
+    align-items:   baseline;
+    gap:           4px 12px;
+    margin-bottom: 4px;
+}
+
+.sig-title { font-weight: 600; font-size: 0.88rem; color: var(--cose-fg); word-break: break-word; }
+.sig-path  { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+
+.sig-line {
+    display:     flex;
+    gap:         8px;
+    font-size:   0.85rem;
+    line-height: 1.45;
+    word-break:  break-word;
+}
+
+.sig-icon     { font-weight: 700; flex: 0 0 auto; }
+.sig-ok       { color: var(--ok-fg); }
+.sig-error    { color: var(--error-fg); }
+.sig-idle     { color: var(--muted); }
 
 /* --------------------------------------------------------------------------
    The parse tree

@@ -4,29 +4,33 @@
  * Two directions, one page:
  *
  *   CBOR → JSON   Paste CBOR as hexadecimal (or Base64), get the parse tree,
- *                 a JSON rendering with every tag-44252 reading as one text
- *                 ("230 V", "(230.00 ±0.12) V, k=2", …) and the diagnostic
- *                 notation of RFC 8949 §8.
+ *                 the JSON text of metrological-text.md §3.1 with every
+ *                 tag-44252 reading as one text ("230 V",
+ *                 "(230.00 ±0.12) V, k=2", …), the diagnostic notation of
+ *                 RFC 8949 §8, and the verdict on every COSE signature.
  *
- *   JSON → CBOR   Paste JSON, get deterministic CBOR. Strings that read as
- *                 metrological values become CBOR tag 44252; everything else
- *                 maps one-to-one under the usual JSON→CBOR rules.
+ *   JSON → CBOR   Paste JSON, get deterministic CBOR under §3.2 of the same
+ *                 document: strings that read as metrological values become
+ *                 CBOR tag 44252, and every number keeps the digits it was
+ *                 written with.
  *
  * Everything runs locally in the browser.
  */
 
 import {
-    decode as decodeCbor, decodeHex, bytesToHex, hexToBytes, diagnostic, walk,
-    mcborToJson, jsonToMcbor,
+    decode as decodeCbor, bytesToHex, hexToBytes, diagnostic, walk,
+    mcborToJson, mcborToJsonText, jsonToMcbor, jsonTextToMcbor,
     metrologicalValueFromCbor, formatMetrologicalValue, parseMetrologicalValue,
     metrologicalValue, encodeMetrologicalValue,
     decimal, integer, unitById, uncertainty, prefixName, prefixSymbol,
+    effectiveCoverageFactor, standardUncertainty, scaleOf, compareDecimal, formatDecimal,
     UnitRegistry, Units, SIPrefix, METROLOGICAL_VALUE_TAG, McborError,
     cbor,
 } from '@vanaheimr/metrological-cbor';
 
 import {
-    CoseSign1, CoseKey, CoseCurves, CoseAlgorithms,
+    CoseSign1, CoseSign, CoseKey, CoseCurves, CoseAlgorithms, CoseHeaders,
+    CoseCertificateChain, X509Certificate, HeaderLabel, label,
     algorithmById, headerLabelName,
 } from '@vanaheimr/cose';
 
@@ -214,13 +218,54 @@ function parseBinaryInput(text) {
 //  Collecting metrological readings, COSE payloads included
 //  ------------------------------------------------------------------
 
+/**
+ * The standard uncertainty u = U/k of a reading whose coverage factor is not
+ * 1, e.g. `u = 0.060 V (U/k, k=2)`, or null.
+ *
+ * The library leaves the scale to the caller, because most quotients have no
+ * exact decimal form. This shows u exactly where a few more digits than the
+ * magnitude has suffice, and rounded to two more digits — marked ≈ — where
+ * they do not.
+ */
+function standardUncertaintyNote(reading) {
+
+    const stated = reading.uncertainty;
+    if (!stated)
+        return null;
+
+    const k = effectiveCoverageFactor(stated);
+    if (compareDecimal(k, integer(1)) === 0)
+        return null;
+
+    const base    = Math.max(scaleOf(stated.magnitude), 0) + 1;
+    const precise = standardUncertainty(stated, { scale: base + 24, rounding: 'half-even' });
+    let shown     = null;
+    for (let scale = base; scale <= base + 6 && !shown; scale++) {
+        const candidate = standardUncertainty(stated, { scale, rounding: 'half-even' });
+        if (compareDecimal(candidate, precise) === 0)
+            shown = candidate;
+    }
+    const exact = shown !== null;
+    shown ??= standardUncertainty(stated, { scale: base + 1, rounding: 'half-even' });
+
+    const quantity = formatMetrologicalValue(metrologicalValue({ value: shown, unit: reading.unit, prefix: reading.prefix }));
+    return `u ${exact ? '=' : '≈'} ${quantity} (U/k, k=${formatDecimal(k)})`;
+}
+
 function collectReadings(value, strict, list, prefix = '$') {
     walk(value, (item, path) => {
 
         if (isTagged(item, METROLOGICAL_VALUE_TAG)) {
             const where = formatPath(prefix, path);
             try {
-                list.push({ ok: true, text: formatMetrologicalValue(metrologicalValueFromCbor(item, { strict })), path: where });
+                const reading = metrologicalValueFromCbor(item, { strict });
+                let note = null;
+                try {
+                    note = standardUncertaintyNote(reading);
+                } catch {
+                    /* a reading the codec accepts is shown even where u cannot be */
+                }
+                list.push({ ok: true, text: formatMetrologicalValue(reading), note, path: where });
             } catch (error) {
                 list.push({ ok: false, text: error.message, path: where, error });
             }
@@ -612,38 +657,72 @@ function looksLikeReading(text) {
     return result;
 }
 
-function jsonHtml(value, depth) {
+const JSON_TOKEN = /\s+|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false)|(null)|([{}[\],:])/y;
 
-    const pad     = '  '.repeat(depth);
-    const padNext = '  '.repeat(depth + 1);
+/**
+ * Indents JSON text and highlights it, working on the text rather than on a
+ * parsed value: JSON.parse would round every integer beyond 2^53, and the
+ * JSON text of metrological-text.md §3.1 writes them with all their digits.
+ */
+function prettyJson(text) {
 
-    if (value === null)
-        return '<span class="j-null">null</span>';
+    const tokens = [];
+    JSON_TOKEN.lastIndex = 0;
+    while (JSON_TOKEN.lastIndex < text.length) {
+        const match = JSON_TOKEN.exec(text);
+        if (!match)
+            throw new Error(`Unexpected JSON text at position ${JSON_TOKEN.lastIndex}.`);
+        const [token, string, number, bool, nil, punctuation] = match;
+        if (string)      tokens.push({ kind: 'str',  token });
+        else if (number) tokens.push({ kind: 'num',  token });
+        else if (bool)   tokens.push({ kind: 'bool', token });
+        else if (nil)    tokens.push({ kind: 'null', token });
+        else if (punctuation) tokens.push({ kind: 'punct', token });
+    }
 
-    switch (typeof value) {
-        case 'string': {
-            const cls = looksLikeReading(value) ? 'j-str j-reading' : 'j-str';
-            return `<span class="${cls}" ${cls.includes('j-reading') ? 'title="metrological reading"' : ''}>${escapeHtml(JSON.stringify(value))}</span>`;
+    let plain = '';
+    let html  = '';
+    let depth = 0;
+    const emit = (raw, marked = escapeHtml(raw)) => { plain += raw; html += marked; };
+    const newline = () => emit('\n' + '  '.repeat(depth));
+
+    tokens.forEach(({ kind, token }, index) => {
+        const next = tokens[index + 1]?.token;
+        switch (token) {
+            case '{': case '[':
+                emit(token);
+                if (next === '}' || next === ']')
+                    return;
+                depth++;
+                newline();
+                return;
+            case '}': case ']':
+                if (tokens[index - 1]?.token !== '{' && tokens[index - 1]?.token !== '[') {
+                    depth--;
+                    newline();
+                }
+                emit(token);
+                return;
+            case ',':
+                emit(',');
+                newline();
+                return;
+            case ':':
+                emit(': ');
+                return;
         }
-        case 'number':
-            return `<span class="j-num">${JSON.stringify(value)}</span>`;
-        case 'boolean':
-            return `<span class="j-bool">${value}</span>`;
-    }
+        if (kind === 'str' && next === ':') {
+            emit(token, `<span class="j-key">${escapeHtml(token)}</span>`);
+            return;
+        }
+        if (kind === 'str' && looksLikeReading(JSON.parse(token))) {
+            emit(token, `<span class="j-str j-reading" title="metrological reading">${escapeHtml(token)}</span>`);
+            return;
+        }
+        emit(token, `<span class="j-${kind}">${escapeHtml(token)}</span>`);
+    });
 
-    if (Array.isArray(value)) {
-        if (value.length === 0)
-            return '[]';
-        const items = value.map((item) => padNext + jsonHtml(item, depth + 1));
-        return `[\n${items.join(',\n')}\n${pad}]`;
-    }
-
-    const keys = Object.keys(value);
-    if (keys.length === 0)
-        return '{}';
-    const entries = keys.map((key) =>
-        `${padNext}<span class="j-key">${escapeHtml(JSON.stringify(key))}</span>: ${jsonHtml(value[key], depth + 1)}`);
-    return `{\n${entries.join(',\n')}\n${pad}}`;
+    return { plain, html };
 }
 
 
@@ -688,8 +767,194 @@ function renderReadings(readings) {
     for (const reading of readings) {
         list.append(h('span', reading.ok ? 'reading-chip' : 'reading-chip reading-bad',
             h('code', null, reading.text),
+            reading.note ? h('span', 'reading-note', reading.note) : null,
             h('span', 'reading-path', reading.path)));
     }
+}
+
+
+//  ------------------------------------------------------------------
+//  Signatures: COSE_Sign1 and COSE_Sign, checked where a key is known
+//  ------------------------------------------------------------------
+
+/** The key the person pasted, parsed once per change of the key field. */
+const verification = { text: null, key: null, anchor: null, description: null, error: null };
+
+/**
+ * Reads the verification key field: a COSE_Key, or an X.509 certificate in
+ * PEM or as DER in hexadecimal or Base64. A certificate is also a trust
+ * anchor for messages that carry a chain.
+ */
+function readVerificationKey(text) {
+
+    if (verification.text === text)
+        return verification;
+
+    Object.assign(verification, { text, key: null, anchor: null, description: null, error: null });
+    if (text.trim() === '')
+        return verification;
+
+    try {
+        const pem   = text.match(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/);
+        const bytes = pem ? base64ToBytes(pem[1].replace(/\s+/g, '')) : parseBinaryInput(text).bytes;
+
+        // DER begins with a SEQUENCE; a COSE_Key is a map and never does.
+        if (bytes[0] === 0x30) {
+            const certificate = X509Certificate.parse(bytes);
+            verification.key         = certificate.publicKey;
+            verification.anchor      = certificate;
+            verification.description = `certificate ${certificate.subject}`;
+        }
+        else {
+            const key = CoseKey.parse(bytes);
+            const kid = key.keyIdentifier ? printableBytes(key.keyIdentifier) ?? bytesToHex(key.keyIdentifier) : null;
+            verification.key         = key.isPrivate ? key.publicKey() : key;
+            verification.description = `COSE_Key${kid ? ` "${kid}"` : ''}${key.curve ? ` on ${key.curve.name}` : ''}`
+                                     + (key.isPrivate ? ' (private — only its public half is used)' : '');
+        }
+    } catch (error) {
+        verification.error = error.message;
+    }
+    return verification;
+}
+
+const formatDate  = (date) => date.toISOString().slice(0, 10);
+const describeKid = (kid) => kid ? ` · kid ${printableBytes(kid) ? `"${printableBytes(kid)}"` : bytesToHex(kid)}` : '';
+
+const passed  = (text) => ({ kind: 'ok',    text });
+const failed  = (text) => ({ kind: 'error', text });
+const pending = (text) => ({ kind: 'idle',  text });
+
+function checkSign1(message, path, supplied) {
+
+    const entry = {
+        path,
+        title: `COSE_Sign1 · ${message.algorithm?.name ?? 'algorithm unknown'}${describeKid(message.keyIdentifier)}`,
+        lines: [],
+    };
+
+    if (message.isDetached) {
+        entry.lines.push(pending('The payload is detached — it is not part of the message, so the signature cannot be checked here.'));
+        return entry;
+    }
+
+    let chain = null;
+    try {
+        chain = message.certificateChain;
+    } catch (error) {
+        entry.lines.push(failed(`Its x5chain is not a certificate chain: ${error.message}`));
+    }
+
+    let anchoredByChain = false;
+    if (chain && supplied.anchor) {
+        const result = message.verifyWithCertificateChain([supplied.anchor]);
+        anchoredByChain = result.verified;
+        entry.lines.push(result.verified
+            ? passed(`Verified: its certificate chain leads to the certificate you supplied, and ${result.signer.subject} signed it.`)
+            : failed(`Not verified against the certificate you supplied: ${result.reason}`));
+    }
+    else if (supplied.key) {
+        const result = message.verify(supplied.key);
+        entry.lines.push(result.verified
+            ? passed(`Verified with the ${supplied.description} you supplied.`)
+            : failed(`Does not verify with the ${supplied.description} you supplied: ${result.reason}`));
+    }
+
+    if (chain && !anchoredByChain) {
+        const signer = chain.endEntity;
+        const result = message.verify(chain.publicKey());
+        entry.lines.push(result.verified
+            ? passed(`Matches the certificate it carries (x5chain): ${signer.subject}, valid ${formatDate(signer.notBefore)} to ${formatDate(signer.notAfter)}. `
+                   + 'Whether that certificate deserves trust is not checked — supply the certificate you trust to check that.')
+            : failed(`Does not verify with the key of the certificate it carries (${signer.subject}): ${result.reason}`));
+    }
+
+    if (entry.lines.length === 0)
+        entry.lines.push(pending('Not checked: no key. Paste the signer\'s public key — a COSE_Key, or an X.509 certificate — above.'));
+
+    return entry;
+}
+
+function checkSign(message, path, supplied) {
+    return message.signatures.map((signature, index) => {
+        const entry = {
+            path:  `${path}.signatures[${index}]`,
+            title: `COSE_Sign · ${signature.algorithm?.name ?? 'algorithm unknown'}${describeKid(signature.keyIdentifier)}`,
+            lines: [],
+        };
+        if (message.isDetached)
+            entry.lines.push(pending('The payload is detached — it is not part of the message, so the signature cannot be checked here.'));
+        else if (supplied.key) {
+            const result = message.verify(signature, supplied.key);
+            entry.lines.push(result.verified
+                ? passed(`Verified with the ${supplied.description} you supplied.`)
+                : failed(`Does not verify with the ${supplied.description} you supplied: ${result.reason}`));
+        }
+        else
+            entry.lines.push(pending('Not checked: no key. Paste the signer\'s public key — a COSE_Key, or an X.509 certificate — above.'));
+        return entry;
+    });
+}
+
+function collectSignatures(value) {
+
+    const supplied = readVerificationKey($('verifyKey').value);
+    const list     = [];
+
+    walk(value, (item, path) => {
+        if (item.type !== 'tag' || (Number(item.tag) !== 18 && Number(item.tag) !== 98))
+            return;
+        const where = formatPath('$', path);
+        try {
+            if (Number(item.tag) === 18)
+                list.push(checkSign1(CoseSign1.parse(item), where, supplied));
+            else
+                list.push(...checkSign(CoseSign.parse(item), where, supplied));
+        } catch (error) {
+            list.push({
+                path:  where,
+                title: Number(item.tag) === 18 ? 'COSE_Sign1' : 'COSE_Sign',
+                lines: [failed(`Not a valid COSE message: ${error.message}`)],
+            });
+        }
+    });
+
+    return list;
+}
+
+const isFailed   = (entry) => entry.lines.some((line) => line.kind === 'error');
+const isVerified = (entry) => !isFailed(entry) && entry.lines.some((line) => line.kind === 'ok');
+
+function renderSignatures(signatures) {
+
+    const panel = $('sigPanel');
+    panel.hidden = signatures.length === 0;
+    if (signatures.length === 0)
+        return;
+
+    const keyStatus = $('keyStatus');
+    if (verification.error)
+        keyStatus.replaceChildren(h('span', 'key-error', `Neither a COSE_Key nor an X.509 certificate: ${verification.error}`));
+    else if (verification.description)
+        keyStatus.replaceChildren(h('span', 'key-ok', `Using the ${verification.description}.`));
+    else
+        keyStatus.replaceChildren();
+
+    const verified = signatures.filter(isVerified).length;
+    const failures = signatures.filter(isFailed).length;
+    $('sigMeta').textContent = `${signatures.length} signature${signatures.length === 1 ? '' : 's'}`
+                             + (verified ? ` · ${verified} verified` : '')
+                             + (failures ? ` · ${failures} failed` : '');
+
+    $('sigList').replaceChildren(...signatures.map((entry) =>
+        h('div', `sig ${isFailed(entry) ? 'sig-failed' : isVerified(entry) ? 'sig-verified' : 'sig-pending'}`,
+            h('div', 'sig-head',
+                h('span', 'sig-title', entry.title),
+                h('span', 'sig-path', entry.path)),
+            ...entry.lines.map((line) =>
+                h('div', `sig-line sig-${line.kind}`,
+                    h('span', 'sig-icon', { ok: '✓', error: '✕', idle: '·' }[line.kind]),
+                    h('span', null, line.text))))));
 }
 
 
@@ -710,6 +975,48 @@ const toJsonOptions = {
     }),
 };
 
+/**
+ * The JSON panel. The JSON text of metrological-text.md §3.1 where the
+ * document has one — exact, and read back to the same bytes by the encoder
+ * on this page — and otherwise the validator's own rendering, which also
+ * shows what JSON cannot hold (integer keys, undefined, unknown tags, …) and
+ * says that it is not that text.
+ */
+function renderJson(value) {
+
+    const jsonPre = $('jsonOut');
+    const note    = $('jsonNote');
+
+    let text;
+    try {
+        text = mcborToJsonText(value);
+        $('jsonMeta').textContent = 'metrological-text.md §3.1';
+        note.hidden = true;
+    } catch (specError) {
+        try {
+            text = JSON.stringify(mcborToJson(value, toJsonOptions)) ?? '';
+        } catch (error) {
+            outputs.json = '';
+            $('jsonMeta').textContent = '';
+            note.hidden = true;
+            jsonPre.replaceChildren(h('span', 'json-error', `No JSON representation: ${error.message}`));
+            return;
+        }
+        // The library's message ends in advice to its own caller ("Pass
+        // onUnknownTag …", "Set mapKeys …"), which this page has followed.
+        const reason = specError.message.replace(/\s*(?:Pass|Set) [a-zA-Z]+ [^.]*\./g, '');
+        $('jsonMeta').textContent = 'extended rendering';
+        note.hidden = false;
+        note.textContent = `Not expressible as the JSON text of metrological-text.md §3.1 — ${reason} `
+                         + 'Shown instead with byte strings in hexadecimal, large integers as strings, '
+                         + 'other keys in diagnostic notation and unknown tags as {"cbor:tag", "cbor:content"}.';
+    }
+
+    const pretty = prettyJson(text);
+    outputs.json = pretty.plain;
+    jsonPre.innerHTML = pretty.html;
+}
+
 function showResults(value, strict) {
 
     renderTree(value, strict);
@@ -717,24 +1024,16 @@ function showResults(value, strict) {
     outputs.diag = diagnostic(value);
     $('diagOut').textContent = outputs.diag;
 
-    const jsonPre = $('jsonOut');
-    try {
-        const json   = mcborToJson(value, toJsonOptions);
-        outputs.json = JSON.stringify(json, null, 2) ?? '';
-        jsonPre.innerHTML = jsonHtml(json, 0);
-        $('jsonMeta').textContent = '';
-    } catch (error) {
-        outputs.json = '';
-        jsonPre.textContent = '';
-        $('jsonMeta').textContent = '';
-        jsonPre.append(h('span', 'json-error', `No JSON representation: ${error.message}`));
-    }
+    renderJson(value);
 
     const readings = collectReadings(value, strict, []);
     renderReadings(readings);
 
+    const signatures = collectSignatures(value);
+    renderSignatures(signatures);
+
     $('results').hidden = false;
-    return readings;
+    return { readings, signatures };
 }
 
 function runDecode(text) {
@@ -769,11 +1068,14 @@ function runDecode(text) {
         }
     }
 
-    const readings = showResults(value, strict);
+    const { readings, signatures } = showResults(value, strict);
+    const verified = signatures.filter(isVerified).length;
     const counts   = `${input.bytes.length} bytes (${input.encoding})`
-                   + (readings.length > 0 ? ` · ${readings.length} reading${readings.length === 1 ? '' : 's'}` : '');
+                   + (readings.length > 0 ? ` · ${readings.length} reading${readings.length === 1 ? '' : 's'}` : '')
+                   + (verified > 0 ? ` · ${verified} signature${verified === 1 ? '' : 's'} verified` : '');
 
-    const invalid = readings.filter((reading) => !reading.ok);
+    const invalid   = readings.filter((reading) => !reading.ok);
+    const forged    = signatures.find(isFailed);
 
     if (invalid.length > 0)
         setStatus('error',
@@ -781,6 +1083,10 @@ function runDecode(text) {
                                                          : `${invalid.length} tag-44252 items are not valid metrological values`}`
             + ` — ${invalid[0].path}: ${invalid[0].text}`,
             errorDetails(invalid[0].error));
+    else if (forged)
+        setStatus('error',
+            `Well-formed CBOR, but a signature does not verify — ${forged.path}: `
+            + forged.lines.find((line) => line.kind === 'error').text);
     else if (strict)
         setStatus('ok', `Valid CBOR — deterministic encoding · ${counts}`);
     else
@@ -794,22 +1100,21 @@ function runEncode(text) {
     $('hexPanel').hidden  = false;
     $('jsonPanel').hidden = true;
 
-    let json;
-    try {
-        json = JSON.parse(text);
-    } catch (error) {
-        setStatus('error', `Invalid JSON: ${error.message}`);
-        $('results').hidden = true;
-        return;
-    }
-
     const detect = $('detectReadings').checked;
 
+    // From the text, not from JSON.parse: that would round every integer
+    // beyond 2^53 and silently keep the last of two equal keys. This reads
+    // every number with the digits it was written with and refuses a
+    // duplicate key (metrological-text.md §3.2).
     let bytes;
     try {
-        bytes = jsonToMcbor(json, { readings: detect ? 'auto' : 'none' });
+        bytes = jsonTextToMcbor(text, { readings: detect ? 'auto' : 'none' });
     } catch (error) {
-        setStatus('error', `Cannot express this document as CBOR: ${error.message}`, errorDetails(error));
+        const malformed = error instanceof McborError && error.code === 'ERR_JSON_TYPE'
+                       && error.message.startsWith('The JSON text is malformed');
+        setStatus('error',
+            malformed ? `Invalid JSON: ${error.message}` : `Cannot express this document as CBOR: ${error.message}`,
+            errorDetails(error));
         $('results').hidden = true;
         return;
     }
@@ -826,7 +1131,7 @@ function runEncode(text) {
         $('results').hidden = true;
         return;
     }
-    const readings = showResults(value, true);
+    const { readings } = showResults(value, true);
 
     setStatus('ok',
         `Encoded to ${bytes.length} bytes of deterministic CBOR`
@@ -850,6 +1155,26 @@ const SESSION_JSON = {
     current:     '16 A',
     temperature: '21.5 °C',
 };
+
+// Two published test keys, for examples only. The first signs with nothing
+// but its key identifier; the second belongs to a self-signed P-256
+// certificate for "CN=meter-0042, O=Example Meter Vendor", valid 2026 to
+// 2035, which its messages carry in x5chain.
+const EXAMPLE_KEY_SCALAR = '6C1382765AEC5358F117733D281C1C7BDC39884D04A45A1E6C67C858BC206C19';
+
+const EXAMPLE_CERTIFICATE_SCALAR = '3A0A66762E04F634D22185B56C4B361A7ED242693EAB6CEA8ECB4B0FC80EBD4B';
+
+const EXAMPLE_CERTIFICATE =
+    '308201B83082015DA00302010202012A300A06082A8648CE3D0403023034311D301B060355040A0C144578616D706C65' +
+    '204D657465722056656E646F723113301106035504030C0A6D657465722D30303432301E170D32363031303130303030' +
+    '30305A170D3335313233313233353935395A3034311D301B060355040A0C144578616D706C65204D657465722056656E' +
+    '646F723113301106035504030C0A6D657465722D303034323059301306072A8648CE3D020106082A8648CE3D03010703' +
+    '4200049C1F667C139E1539845E093CF7E18544603996C2931E70714AD184310FAFE2728760E32BDBF05FE58B97822F68' +
+    '230B7065D25F7229B3F7FD906585148045AA10A360305E301D0603551D0E04160414B44768700E5D2CE83BB74975A484' +
+    'CD2861906146301F0603551D23041830168014B44768700E5D2CE83BB74975A484CD2861906146300E0603551D0F0101' +
+    'FF040403020780300C0603551D130101FF04023000300A06082A8648CE3D0403020349003046022100E998A1A5C28941' +
+    '075394B8E9D194BFBCECD0C5E665A55644BCD0888DAA8683C2022100EEAAAF8C716F5EB2784188CD1215CC23FA2864AB' +
+    'FC4211CEAF762913F23BD45F';
 
 function buildExamples() {
 
@@ -879,16 +1204,42 @@ function buildExamples() {
         examples.decode.push({ label: 'Charging session', value: bytesToHex(sessionBytes) });
     } catch { /* see above */ }
 
+    // A message that names its key only by identifier is checked with the
+    // public key the example puts into the key field.
     try {
         if (sessionBytes) {
             const key = CoseKey.fromPrivateScalar(
                 CoseCurves.P256,
-                hexToBytes('6C1382765AEC5358F117733D281C1C7BDC39884D04A45A1E6C67C858BC206C19'),
+                hexToBytes(EXAMPLE_KEY_SCALAR),
                 { algorithm: CoseAlgorithms.ES256, keyIdentifier: utf8('meter-0042') });
             const signed = CoseSign1.sign(sessionBytes, key);
-            examples.decode.push({ label: 'COSE-signed record', value: bytesToHex(signed.toBytes()) });
+            examples.decode.push({
+                label: 'COSE-signed record',
+                value: bytesToHex(signed.toBytes()),
+                key:   bytesToHex(key.publicKey().toBytes()),
+            });
         }
     } catch { /* see above */ }
+
+    // A message that carries its certificate is checked against it without
+    // any key — and against a trust anchor only when one is supplied.
+    try {
+        if (sessionBytes) {
+            const key = CoseKey.fromPrivateScalar(
+                CoseCurves.P256,
+                hexToBytes(EXAMPLE_CERTIFICATE_SCALAR),
+                { algorithm: CoseAlgorithms.ES256 });
+            const chain   = new CoseCertificateChain([X509Certificate.parse(hexToBytes(EXAMPLE_CERTIFICATE))]);
+            const headers = CoseHeaders.create(CoseAlgorithms.ES256).set(label(HeaderLabel.x5Chain), chain.toCbor());
+            const signed  = CoseSign1.signWithHeaders(sessionBytes, key, headers, null);
+            examples.decode.push({ label: 'COSE with certificate', value: bytesToHex(signed.toBytes()), key: '' });
+        }
+    } catch { /* see above */ }
+
+    // Examples without a signature leave the key field empty, so that a key
+    // from an earlier example does not linger as an unexplained failure.
+    for (const example of examples.decode)
+        example.key ??= '';
 
     examples.encode.push({
         label: 'Simple readings',
@@ -904,6 +1255,16 @@ function buildExamples() {
     examples.encode.push({
         label: 'Charging session',
         value: JSON.stringify(SESSION_JSON, null, 2),
+    });
+
+    // Written as text: JSON.stringify could not even hold the counter.
+    examples.encode.push({
+        label: 'Exact numbers',
+        value: '{\n'
+             + '  "registerCount": 18446744073709551615,\n'
+             + '  "pricePerKWh":   0.30,\n'
+             + '  "energy":        "1.10 kWh"\n'
+             + '}',
     });
 
     return examples;
@@ -930,6 +1291,8 @@ function renderExampleButtons() {
         button.addEventListener('click', () => {
             $('input').value = example.value;
             state.inputs[state.mode] = example.value;
+            if (example.key !== undefined)
+                $('verifyKey').value = example.key;
             run();
         });
         host.append(button);
@@ -954,6 +1317,7 @@ function applyMode() {
         : 'Paste JSON, e.g.\n\n{\n  "voltage": "230.0 V",\n  "energy":  "1.10 kWh"\n}';
 
     $('readingsOption').hidden = decode;
+    $('encodeNote').hidden     = decode;
 
     $('input').value = state.inputs[state.mode];
     renderExampleButtons();
@@ -1002,6 +1366,11 @@ function init() {
     });
 
     $('detectReadings').addEventListener('change', run);
+
+    $('verifyKey').addEventListener('input', () => {
+        clearTimeout(debounce);
+        debounce = setTimeout(run, 160);
+    });
 
     for (const button of document.querySelectorAll('button.copy')) {
         button.addEventListener('click', async () => {
