@@ -17,7 +17,7 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@vanaheimr/cose": "^0.12.0",
+    "@vanaheimr/cose": "^0.13.0",
     "@vanaheimr/metrological-cbor": "^0.12.0"
   },
   "devDependencies": {

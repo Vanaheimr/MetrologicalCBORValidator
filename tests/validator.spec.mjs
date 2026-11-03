@@ -8,6 +8,7 @@
 
 import { test as base, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
+import { generateKeyPairSync } from 'node:crypto';
 import { bytesToHex, hexToBytes, jsonTextToMcbor } from '@vanaheimr/metrological-cbor';
 import { CoseSign1, CoseKey, CoseCurves, CoseAlgorithms } from '@vanaheimr/cose';
 
@@ -230,6 +231,29 @@ test.describe('CBOR → JSON', () => {
         await expect(status(page)).toHaveClass(/\bok\b/);
         await expect(signatures(page)).toHaveClass(/\bsig-pending\b/);
         await expect(signatures(page)).toContainText('Not checked: no key');
+    });
+
+    test('checks an RSA signature against an RSA COSE_Key', async ({ page }) => {
+        // A fresh key from Node's own RSA, so the page is held to a key that
+        // neither it nor the library made.
+        const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+        const jwk  = privateKey.export({ format: 'jwk' });
+        const part = (name) => new Uint8Array(Buffer.from(jwk[name], 'base64url'));
+        const key  = CoseKey.fromRsaPrivateKey(
+            { n: part('n'), e: part('e'), d: part('d'), p: part('p'), q: part('q'),
+              dP: part('dp'), dQ: part('dq'), qInv: part('qi') },
+            { algorithm: CoseAlgorithms.PS256 });
+        const signed = bytesToHex(CoseSign1.sign(hexToBytes(README.certificate), key).toBytes());
+
+        await input(page).fill(signed);
+        await verifyKey(page).fill(bytesToHex(key.publicKey().toBytes()));
+        await expect(page.locator('#tree')).toContainText('PS256');
+        await expect(signatures(page)).toHaveClass(/\bsig-verified\b/);
+        await expect(status(page)).toContainText('1 signature verified');
+
+        await input(page).fill(flipLastDigit(signed));
+        await expect(status(page)).toContainText('a signature does not verify');
+        await expect(signatures(page)).toHaveClass(/\bsig-failed\b/);
     });
 
     test('checks a COSE_Sign1 against the certificate it carries, and against a trusted one', async ({ page }) => {
