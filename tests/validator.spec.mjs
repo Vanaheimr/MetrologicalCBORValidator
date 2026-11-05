@@ -233,6 +233,47 @@ test.describe('CBOR → JSON', () => {
         await expect(signatures(page)).toContainText('Not checked: no key');
     });
 
+    test('checks a countersignature on its own, with the countersigner\'s key', async ({ page }) => {
+        await page.getByRole('button', { name: 'COSE with countersignature' }).click();
+        await expect(signatures(page)).toHaveCount(2);
+        await expect(signatures(page).nth(1)).toContainText('Countersignature · ESP256 · kid "operator-backend"');
+        await expect(signatures(page).nth(1)).toContainText('$[1][11]');
+        await expect(signatures(page)).toHaveClass([/\bsig-verified\b/, /\bsig-verified\b/]);
+        await expect(page.locator('#keyStatus')).toContainText('COSE_Key "meter-0042" on P-256, and the COSE_Key "operator-backend" on P-256');
+        await expect(status(page)).toContainText('2 signatures verified');
+
+        // Checked in Node as well, with the key the page was given for it,
+        // so that the page cannot be agreeing only with itself.
+        const [meterKey, backendKey] = (await verifyKey(page).inputValue()).split('\n')
+            .map((line) => CoseKey.parse(hexToBytes(line)));
+        const message = CoseSign1.parse(hexToBytes(await input(page).inputValue()));
+        expect(message.countersignatures).toHaveLength(1);
+        expect(message.verifyCountersignature(message.countersignatures[0], backendKey).verified).toBe(true);
+        expect(message.verifyCountersignature(message.countersignatures[0], meterKey).verified).toBe(false);
+
+        // Without the countersigner's key, the countersignature is left
+        // unchecked — not failed — and the meter's signature still verifies.
+        await verifyKey(page).fill(bytesToHex(meterKey.toBytes()));
+        await expect(signatures(page)).toHaveClass([/\bsig-verified\b/, /\bsig-pending\b/]);
+        await expect(signatures(page).nth(1)).toContainText('none of the keys you supplied has its key identifier, "operator-backend"');
+        await expect(status(page)).toHaveClass(/\bok\b/);
+
+        // A key that claims the countersigner's identifier and is not its key.
+        const impostor = CoseKey.fromPrivateScalar(
+            CoseCurves.P256,
+            hexToBytes('6C1382765AEC5358F117733D281C1C7BDC39884D04A45A1E6C67C858BC206C19'),
+            { algorithm: CoseAlgorithms.ESP256, keyIdentifier: new TextEncoder().encode('operator-backend') });
+        await verifyKey(page).fill(`${bytesToHex(meterKey.toBytes())}\n\n${bytesToHex(impostor.publicKey().toBytes())}`);
+        await expect(signatures(page)).toHaveClass([/\bsig-verified\b/, /\bsig-failed\b/]);
+        await expect(status(page)).toContainText('a signature does not verify');
+
+        // A countersignature vouches for the meter's signature, so altering
+        // that signature breaks both.
+        await verifyKey(page).fill(`${bytesToHex(meterKey.toBytes())}\n${bytesToHex(backendKey.toBytes())}`);
+        await input(page).fill(flipLastDigit(await input(page).inputValue()));
+        await expect(signatures(page)).toHaveClass([/\bsig-failed\b/, /\bsig-failed\b/]);
+    });
+
     test('checks an RSA signature against an RSA COSE_Key', async ({ page }) => {
         // A fresh key from Node's own RSA, so the page is held to a key that
         // neither it nor the library made.

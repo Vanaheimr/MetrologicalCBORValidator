@@ -19,9 +19,13 @@ Two directions, switchable on the page:
     COSE payloads included, with its standard uncertainty *u* = *U*/*k*
     where a coverage factor is stated (`u = 0.060 V`),
   - the verdict on every COSE_Sign1 and COSE_Sign signature: against the
-    certificate a message carries (`x5chain`), against a COSE_Key or X.509
-    certificate pasted into the key field, and — given a certificate — whether
-    the message's chain leads to it,
+    certificate a message carries (`x5chain`), against the COSE_Keys or X.509
+    certificates pasted into the key field, and — given a certificate —
+    whether the message's chain leads to it,
+  - the verdict on every countersignature of RFC 9338 a COSE_Sign1 carries,
+    on its own: a second party vouching for the signature, checked with that
+    party's key, and left unchecked rather than failed when no key with its
+    identifier was supplied,
   - the structured parse tree, with mCBOR roles (value, unit, prefix,
     uncertainty), unit and SI-prefix names, and COSE_Sign1/COSE_Sign/… buckets
     annotated and their protected headers and payloads decoded inline,
@@ -79,8 +83,8 @@ browser with [Playwright](https://playwright.dev): the worked examples of the
 codec's README decode to the readings they document, malformed and
 non-deterministic CBOR is refused or flagged, a tag 44252 that is not a valid
 metrological value fails validation, JSON round-trips through CBOR unchanged
-with every digit of every number, a COSE signature verifies with the right key
-or certificate and fails once the message is altered, and the
+with every digit of every number, a COSE signature or countersignature verifies
+with the right key or certificate and fails once the message is altered, and the
 COSE-signed example verifies in Node with the key it was made from. Any page
 error or console error fails the test it happened in. `BROWSERS=all` runs
 Chromium, Firefox and WebKit.

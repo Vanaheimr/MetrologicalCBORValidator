@@ -777,53 +777,115 @@ function renderReadings(readings) {
 //  Signatures: COSE_Sign1 and COSE_Sign, checked where a key is known
 //  ------------------------------------------------------------------
 
-/** The key the person pasted, parsed once per change of the key field. */
-const verification = { text: null, key: null, anchor: null, description: null, error: null };
+/** The keys the person pasted, parsed once per change of the key field. */
+const verification = { text: null, keys: [], error: null };
 
 /**
- * Reads the verification key field: a COSE_Key, or an X.509 certificate in
- * PEM or as DER in hexadecimal or Base64. A certificate is also a trust
- * anchor for messages that carry a chain.
+ * Reads one key: a COSE_Key, or an X.509 certificate as DER. A certificate is
+ * also a trust anchor for messages that carry a chain.
+ */
+function readOneKey(bytes) {
+
+    // DER begins with a SEQUENCE; a COSE_Key is a map and never does.
+    if (bytes[0] === 0x30) {
+        const certificate = X509Certificate.parse(bytes);
+        return { key: certificate.publicKey, anchor: certificate, kid: null,
+                 description: `certificate ${certificate.subject}` };
+    }
+
+    const key = CoseKey.parse(bytes);
+    const kid = key.keyIdentifier ? printableBytes(key.keyIdentifier) ?? bytesToHex(key.keyIdentifier) : null;
+    return {
+        key:         key.isPrivate ? key.publicKey() : key,
+        anchor:      null,
+        kid:         key.keyIdentifier,
+        description: `COSE_Key${kid ? ` "${kid}"` : ''}${key.curve ? ` on ${key.curve.name}` : ''}`
+                   + (key.isPrivate ? ' (private — only its public half is used)' : ''),
+    };
+}
+
+/**
+ * Reads the verification key field: one key or several — a message and its
+ * countersignature are signed by different parties. Certificates in PEM may
+ * stand anywhere; other keys, as hexadecimal or Base64, are separated by an
+ * empty line, or stand one per line.
  */
 function readVerificationKey(text) {
 
     if (verification.text === text)
         return verification;
 
-    Object.assign(verification, { text, key: null, anchor: null, description: null, error: null });
-    if (text.trim() === '')
-        return verification;
+    Object.assign(verification, { text, keys: [], error: null });
+
+    const pems = [...text.matchAll(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/g)];
+    const rest = text.replace(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g, '\n\n');
 
     try {
-        const pem   = text.match(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/);
-        const bytes = pem ? base64ToBytes(pem[1].replace(/\s+/g, '')) : parseBinaryInput(text).bytes;
+        for (const pem of pems)
+            verification.keys.push(readOneKey(base64ToBytes(pem[1].replace(/\s+/g, ''))));
 
-        // DER begins with a SEQUENCE; a COSE_Key is a map and never does.
-        if (bytes[0] === 0x30) {
-            const certificate = X509Certificate.parse(bytes);
-            verification.key         = certificate.publicKey;
-            verification.anchor      = certificate;
-            verification.description = `certificate ${certificate.subject}`;
-        }
-        else {
-            const key = CoseKey.parse(bytes);
-            const kid = key.keyIdentifier ? printableBytes(key.keyIdentifier) ?? bytesToHex(key.keyIdentifier) : null;
-            verification.key         = key.isPrivate ? key.publicKey() : key;
-            verification.description = `COSE_Key${kid ? ` "${kid}"` : ''}${key.curve ? ` on ${key.curve.name}` : ''}`
-                                     + (key.isPrivate ? ' (private — only its public half is used)' : '');
+        for (const block of rest.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean)) {
+            // A block is one key, perhaps wrapped over several lines — or,
+            // failing that, one key on each of its lines.
+            try {
+                verification.keys.push(readOneKey(parseBinaryInput(block).bytes));
+            } catch (error) {
+                const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
+                if (lines.length < 2)
+                    throw error;
+                try {
+                    verification.keys.push(...lines.map((line) => readOneKey(parseBinaryInput(line).bytes)));
+                } catch {
+                    throw error;
+                }
+            }
         }
     } catch (error) {
+        verification.keys = [];
         verification.error = error.message;
     }
     return verification;
 }
 
 const formatDate  = (date) => date.toISOString().slice(0, 10);
-const describeKid = (kid) => kid ? ` · kid ${printableBytes(kid) ? `"${printableBytes(kid)}"` : bytesToHex(kid)}` : '';
+const kidText     = (kid) => printableBytes(kid) ? `"${printableBytes(kid)}"` : bytesToHex(kid);
+const describeKid = (kid) => kid ? ` · kid ${kidText(kid)}` : '';
+const sameBytes   = (a, b) => a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 const passed  = (text) => ({ kind: 'ok',    text });
 const failed  = (text) => ({ kind: 'error', text });
 const pending = (text) => ({ kind: 'idle',  text });
+
+const NO_KEY = 'Not checked: no key. Paste the signer\'s public key — a COSE_Key, or an X.509 certificate — above.';
+
+/**
+ * Checks one signature against the keys supplied. A key identifier is only a
+ * hint, but it says which of several keys to try: a COSE_Key that names a
+ * different one is passed over, and a signature none of whose candidates is
+ * left stays unchecked rather than failed — the person may simply not have
+ * the countersigner's key. Returns null when no key was supplied at all.
+ */
+function checkWithSuppliedKeys(supplied, kid, verify) {
+
+    if (supplied.keys.length === 0)
+        return null;
+
+    const candidates = supplied.keys.filter((entry) => !kid || !entry.kid || sameBytes(entry.kid, kid));
+    if (candidates.length === 0)
+        return pending(`Not checked: none of the keys you supplied has its key identifier, ${kidText(kid)}.`);
+
+    const reasons = [];
+    for (const candidate of candidates) {
+        const result = verify(candidate.key);
+        if (result.verified)
+            return passed(`Verified with the ${candidate.description} you supplied.`);
+        reasons.push(result.reason);
+    }
+
+    return candidates.length === 1
+        ? failed(`Does not verify with the ${candidates[0].description} you supplied: ${reasons[0]}`)
+        : failed(`Verifies with none of the ${candidates.length} keys you supplied: ${[...new Set(reasons)].join(' ')}`);
+}
 
 function checkSign1(message, path, supplied) {
 
@@ -845,19 +907,20 @@ function checkSign1(message, path, supplied) {
         entry.lines.push(failed(`Its x5chain is not a certificate chain: ${error.message}`));
     }
 
+    const anchors = supplied.keys.map((key) => key.anchor).filter(Boolean);
+
     let anchoredByChain = false;
-    if (chain && supplied.anchor) {
-        const result = message.verifyWithCertificateChain([supplied.anchor]);
+    if (chain && anchors.length > 0) {
+        const result = message.verifyWithCertificateChain(anchors);
         anchoredByChain = result.verified;
         entry.lines.push(result.verified
             ? passed(`Verified: its certificate chain leads to the certificate you supplied, and ${result.signer.subject} signed it.`)
             : failed(`Not verified against the certificate you supplied: ${result.reason}`));
     }
-    else if (supplied.key) {
-        const result = message.verify(supplied.key);
-        entry.lines.push(result.verified
-            ? passed(`Verified with the ${supplied.description} you supplied.`)
-            : failed(`Does not verify with the ${supplied.description} you supplied: ${result.reason}`));
+    else {
+        const line = checkWithSuppliedKeys(supplied, message.keyIdentifier, (key) => message.verify(key));
+        if (line)
+            entry.lines.push(line);
     }
 
     if (chain && !anchoredByChain) {
@@ -870,9 +933,41 @@ function checkSign1(message, path, supplied) {
     }
 
     if (entry.lines.length === 0)
-        entry.lines.push(pending('Not checked: no key. Paste the signer\'s public key — a COSE_Key, or an X.509 certificate — above.'));
+        entry.lines.push(pending(NO_KEY));
 
     return entry;
+}
+
+/**
+ * The countersignatures of RFC 9338 (label 11) a COSE_Sign1 carries. Each
+ * vouches for the message's signature, not only for its payload — but whether
+ * that signature itself verifies is its own entry, checked on its own.
+ */
+function checkCountersignatures(message, path, supplied) {
+
+    let countersignatures;
+    try {
+        countersignatures = message.countersignatures;
+    } catch (error) {
+        return [{ path: `${path}[1][11]`, title: 'Countersignature',
+                  lines: [failed(`Not a countersignature: ${error.message}`)] }];
+    }
+
+    return countersignatures.map((countersignature, index) => {
+        const entry = {
+            path:  countersignatures.length === 1 ? `${path}[1][11]` : `${path}[1][11][${index}]`,
+            title: `Countersignature · ${countersignature.algorithm?.name ?? 'algorithm unknown'}${describeKid(countersignature.keyIdentifier)}`,
+            lines: [],
+        };
+        if (message.isDetached)
+            entry.lines.push(pending('The payload is detached — it is not part of the message, so the countersignature cannot be checked here.'));
+        else
+            entry.lines.push(
+                checkWithSuppliedKeys(supplied, countersignature.keyIdentifier,
+                    (key) => message.verifyCountersignature(countersignature, key))
+                ?? pending('Not checked: no key. Paste the countersigner\'s public key — a COSE_Key, or an X.509 certificate — above.'));
+        return entry;
+    });
 }
 
 function checkSign(message, path, supplied) {
@@ -884,14 +979,10 @@ function checkSign(message, path, supplied) {
         };
         if (message.isDetached)
             entry.lines.push(pending('The payload is detached — it is not part of the message, so the signature cannot be checked here.'));
-        else if (supplied.key) {
-            const result = message.verify(signature, supplied.key);
-            entry.lines.push(result.verified
-                ? passed(`Verified with the ${supplied.description} you supplied.`)
-                : failed(`Does not verify with the ${supplied.description} you supplied: ${result.reason}`));
-        }
         else
-            entry.lines.push(pending('Not checked: no key. Paste the signer\'s public key — a COSE_Key, or an X.509 certificate — above.'));
+            entry.lines.push(
+                checkWithSuppliedKeys(supplied, signature.keyIdentifier, (key) => message.verify(signature, key))
+                ?? pending(NO_KEY));
         return entry;
     });
 }
@@ -906,8 +997,10 @@ function collectSignatures(value) {
             return;
         const where = formatPath('$', path);
         try {
-            if (Number(item.tag) === 18)
-                list.push(checkSign1(CoseSign1.parse(item), where, supplied));
+            if (Number(item.tag) === 18) {
+                const message = CoseSign1.parse(item);
+                list.push(checkSign1(message, where, supplied), ...checkCountersignatures(message, where, supplied));
+            }
             else
                 list.push(...checkSign(CoseSign.parse(item), where, supplied));
         } catch (error) {
@@ -935,8 +1028,9 @@ function renderSignatures(signatures) {
     const keyStatus = $('keyStatus');
     if (verification.error)
         keyStatus.replaceChildren(h('span', 'key-error', `Neither a COSE_Key nor an X.509 certificate: ${verification.error}`));
-    else if (verification.description)
-        keyStatus.replaceChildren(h('span', 'key-ok', `Using the ${verification.description}.`));
+    else if (verification.keys.length > 0)
+        keyStatus.replaceChildren(h('span', 'key-ok',
+            `Using the ${verification.keys.map((key) => key.description).join(', and the ')}.`));
     else
         keyStatus.replaceChildren();
 
@@ -1164,6 +1258,9 @@ const EXAMPLE_KEY_SCALAR = '6C1382765AEC5358F117733D281C1C7BDC39884D04A45A1E6C67
 
 const EXAMPLE_CERTIFICATE_SCALAR = '3A0A66762E04F634D22185B56C4B361A7ED242693EAB6CEA8ECB4B0FC80EBD4B';
 
+// A third, for the party that countersigns what the meter signed.
+const EXAMPLE_COUNTERSIGNER_SCALAR = 'D7BDB783D0117FF5B3ECAC879989059B23C54B010E8388C9987484F56C3B7323';
+
 const EXAMPLE_CERTIFICATE =
     '308201B83082015DA00302010202012A300A06082A8648CE3D0403023034311D301B060355040A0C144578616D706C65' +
     '204D657465722056656E646F723113301106035504030C0A6D657465722D30303432301E170D32363031303130303030' +
@@ -1217,6 +1314,19 @@ function buildExamples() {
                 label: 'COSE-signed record',
                 value: bytesToHex(signed.toBytes()),
                 key:   bytesToHex(key.publicKey().toBytes()),
+            });
+
+            // The same record, countersigned by the operator's backend
+            // [RFC 9338]: a second party vouching for the meter's signature.
+            // The key field holds both public keys, one per line.
+            const backend = CoseKey.fromPrivateScalar(
+                CoseCurves.P256,
+                hexToBytes(EXAMPLE_COUNTERSIGNER_SCALAR),
+                { algorithm: CoseAlgorithms.ESP256, keyIdentifier: utf8('operator-backend') });
+            examples.decode.push({
+                label: 'COSE with countersignature',
+                value: bytesToHex(signed.addCountersignature(backend).toBytes()),
+                key:   `${bytesToHex(key.publicKey().toBytes())}\n${bytesToHex(backend.publicKey().toBytes())}`,
             });
         }
     } catch { /* see above */ }

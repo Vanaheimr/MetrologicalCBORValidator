@@ -87,9 +87,9 @@
                 </div>
                 <div class="sig-key">
                     <label for="verifyKey">
-                        Verification key <span class="unit-note">— a COSE_Key, or an X.509 certificate (PEM, or DER as hexadecimal or Base64). A certificate also serves as the trust anchor for messages that carry a chain.</span>
+                        Verification keys <span class="unit-note">— a COSE_Key, or an X.509 certificate (PEM, or DER as hexadecimal or Base64); several one per line, such as a signer's and a countersigner's. A certificate also serves as the trust anchor for messages that carry a chain.</span>
                     </label>
-                    <textarea id="verifyKey" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off"
+                    <textarea id="verifyKey" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off"
                               placeholder="Optional — messages that carry their certificate (x5chain) are checked against it either way"></textarea>
                     <div id="keyStatus" class="key-status"></div>
                 </div>
