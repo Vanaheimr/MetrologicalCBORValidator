@@ -274,6 +274,35 @@ test.describe('CBOR → JSON', () => {
         await expect(signatures(page)).toHaveClass([/\bsig-failed\b/, /\bsig-failed\b/]);
     });
 
+    test('checks the countersignature of RFC 8152 too, and says what it does not cover', async ({ page }) => {
+        // countersign/signed1-01 of https://github.com/cose-wg/Examples: a
+        // COSE_Sign1 signed with EdDSA on Ed25519 and countersigned at label
+        // 7 with the same key, whose public half the working group publishes.
+        const signed = 'D28445A201270300A2078343A10127A10442313158406DAED158AFE4032E8DD477D3D2B7F667E7957AA8302BB5E568B4DCBCCE3CF0ED5A90F831351C85D6155A42A17CA1F25F501CC13F67108AE53BDA92DB88272E000442313154546869732069732074686520636F6E74656E742E58407142FD2FF96D56DB85BEE905A76BA1D0B7321A95C8C4D3607C5781932B7AFB8711497DFA751BF40B58B3BCC32300B1487F3DB34085EEF013BF08F4A44D6FEF0D';
+        const key    = CoseKey.fromOkpPublicKey(
+            CoseCurves.Ed25519,
+            hexToBytes('D75A980182B10AB7D54BFED3C964073A0EE172F3DAA62325AF021A68F707511A'));
+
+        await input(page).fill(signed);
+        await verifyKey(page).fill(bytesToHex(key.toBytes()));
+        await expect(signatures(page)).toHaveCount(2);
+        await expect(signatures(page).nth(1)).toContainText('Countersignature (RFC 8152) · EdDSA · kid "11"');
+        await expect(signatures(page).nth(1)).toContainText('$[1][7]');
+        await expect(signatures(page).nth(1)).toContainText('covers the payload but not the signature');
+        await expect(signatures(page)).toHaveClass([/\bsig-verified\b/, /\bsig-verified\b/]);
+        await expect(page.locator('#sigMeta')).toHaveText('2 signatures · 2 verified');
+
+        // The example writes label 7 before label 4, which the page flags —
+        // RFC 8152 asked for no deterministic encoding.
+        await expect(status(page)).toHaveClass(/\bwarn\b/);
+        await expect(status(page)).toContainText('ERR_CBOR_UNSORTED_KEYS');
+
+        // Which is exactly its weakness: with the body signature altered, the
+        // countersignature of RFC 8152 still verifies.
+        await input(page).fill(flipLastDigit(signed));
+        await expect(signatures(page)).toHaveClass([/\bsig-failed\b/, /\bsig-verified\b/]);
+    });
+
     test('checks an RSA signature against an RSA COSE_Key', async ({ page }) => {
         // A fresh key from Node's own RSA, so the page is held to a key that
         // neither it nor the library made.

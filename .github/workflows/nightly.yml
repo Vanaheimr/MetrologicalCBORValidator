@@ -59,7 +59,7 @@ jobs:
       - name: Install the newest published codec and COSE
         # Under 0.x a caret range never admits the next minor, so `npm install`
         # alone would not notice @vanaheimr/metrological-cbor 0.13 or
-        # @vanaheimr/cose 0.15 arriving. This installs whatever `latest` is
+        # @vanaheimr/cose 0.16 arriving. This installs whatever `latest` is
         # and tells the morning after a release whether the validator still
         # builds and passes against it — before anyone moves the ranges.
         run: npm install --no-save @vanaheimr/metrological-cbor@latest @vanaheimr/cose@latest

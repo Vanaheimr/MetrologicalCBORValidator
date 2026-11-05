@@ -22,10 +22,11 @@ Two directions, switchable on the page:
     certificate a message carries (`x5chain`), against the COSE_Keys or X.509
     certificates pasted into the key field, and — given a certificate —
     whether the message's chain leads to it,
-  - the verdict on every countersignature of RFC 9338 a COSE_Sign1 carries,
-    on its own: a second party vouching for the signature, checked with that
+  - the verdict on every countersignature a COSE_Sign1 carries, on its own:
+    a second party vouching for the signature (RFC 9338), checked with that
     party's key, and left unchecked rather than failed when no key with its
-    identifier was supplied,
+    identifier was supplied — and the older countersignature of RFC 8152,
+    with the note that it covers the payload but not the signature,
   - the structured parse tree, with mCBOR roles (value, unit, prefix,
     uncertainty), unit and SI-prefix names, and COSE_Sign1/COSE_Sign/… buckets
     annotated and their protected headers and payloads decoded inline,

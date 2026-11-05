@@ -939,34 +939,57 @@ function checkSign1(message, path, supplied) {
 }
 
 /**
- * The countersignatures of RFC 9338 (label 11) a COSE_Sign1 carries. Each
- * vouches for the message's signature, not only for its payload — but whether
- * that signature itself verifies is its own entry, checked on its own.
+ * The countersignatures a COSE_Sign1 carries: those of RFC 9338 at label 11,
+ * and the older ones of RFC 8152 at label 7. Each is its own entry, because
+ * whether the message's signature verifies is a separate question.
  */
+const COUNTERSIGNATURE_KINDS = [
+    {
+        label:  11,
+        title:  'Countersignature',
+        read:   (message) => message.countersignatures,
+        verify: (message, countersignature, key) => message.verifyCountersignature(countersignature, key),
+        note:   null,
+    },
+    {
+        label:  7,
+        title:  'Countersignature (RFC 8152)',
+        read:   (message) => message.rfc8152Countersignatures,
+        verify: (message, countersignature, key) => message.verifyRfc8152Countersignature(countersignature, key),
+        note:   'The countersignature of RFC 8152 covers the payload but not the signature — it does not show that '
+              + 'its signer saw this signature, which is why RFC 9338 replaced it.',
+    },
+];
+
 function checkCountersignatures(message, path, supplied) {
 
-    let countersignatures;
-    try {
-        countersignatures = message.countersignatures;
-    } catch (error) {
-        return [{ path: `${path}[1][11]`, title: 'Countersignature',
-                  lines: [failed(`Not a countersignature: ${error.message}`)] }];
-    }
+    return COUNTERSIGNATURE_KINDS.flatMap((kind) => {
 
-    return countersignatures.map((countersignature, index) => {
-        const entry = {
-            path:  countersignatures.length === 1 ? `${path}[1][11]` : `${path}[1][11][${index}]`,
-            title: `Countersignature · ${countersignature.algorithm?.name ?? 'algorithm unknown'}${describeKid(countersignature.keyIdentifier)}`,
-            lines: [],
-        };
-        if (message.isDetached)
-            entry.lines.push(pending('The payload is detached — it is not part of the message, so the countersignature cannot be checked here.'));
-        else
-            entry.lines.push(
-                checkWithSuppliedKeys(supplied, countersignature.keyIdentifier,
-                    (key) => message.verifyCountersignature(countersignature, key))
-                ?? pending('Not checked: no key. Paste the countersigner\'s public key — a COSE_Key, or an X.509 certificate — above.'));
-        return entry;
+        let countersignatures;
+        try {
+            countersignatures = kind.read(message);
+        } catch (error) {
+            return [{ path: `${path}[1][${kind.label}]`, title: kind.title,
+                      lines: [failed(`Not a countersignature: ${error.message}`)] }];
+        }
+
+        return countersignatures.map((countersignature, index) => {
+            const entry = {
+                path:  countersignatures.length === 1 ? `${path}[1][${kind.label}]` : `${path}[1][${kind.label}][${index}]`,
+                title: `${kind.title} · ${countersignature.algorithm?.name ?? 'algorithm unknown'}${describeKid(countersignature.keyIdentifier)}`,
+                lines: [],
+            };
+            if (message.isDetached)
+                entry.lines.push(pending('The payload is detached — it is not part of the message, so the countersignature cannot be checked here.'));
+            else
+                entry.lines.push(
+                    checkWithSuppliedKeys(supplied, countersignature.keyIdentifier,
+                        (key) => kind.verify(message, countersignature, key))
+                    ?? pending('Not checked: no key. Paste the countersigner\'s public key — a COSE_Key, or an X.509 certificate — above.'));
+            if (kind.note)
+                entry.lines.push(pending(kind.note));
+            return entry;
+        });
     });
 }
 
